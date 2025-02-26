@@ -175,5 +175,5 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 # Run with Render-assigned port
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, port=port)
+    port = int(os.environ.get("PORT", 8001))
+    uvicorn.run(app, host="0.0.0.0", port=port)
