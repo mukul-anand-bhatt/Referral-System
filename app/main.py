@@ -16,6 +16,8 @@ from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 import uuid
+from fastapi import Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 load_dotenv()
 
@@ -103,7 +105,7 @@ logger = logging.getLogger(__name__)
 
 
 
-@app.post("/signup")
+@app.post("/register")
 def signup(user: UserCreate, db: Session = Depends(get_db)):
     hashed_password = get_password_hash(user.password)
     new_referral_token = str(uuid.uuid4())
@@ -159,7 +161,7 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
-@app.post("/token", response_model=Token)
+@app.post("/login", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: SessionLocal = Depends(get_db)):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
@@ -171,6 +173,47 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(data={"sub": user.username}, expires_delta=access_token_expires)
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+#Adding refferal logic
+security = HTTPBearer()
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: SessionLocal = Depends(get_db)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
+        
+        user = db.query(UserDB).filter(UserDB.username == username).first()
+        if user is None:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+@app.get("/referrals")
+def get_my_referrals(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+    db: SessionLocal = Depends(get_db)
+):
+    token = credentials.credentials
+    user = get_current_user(token, db)
+
+    referrals = (
+        db.query(UserDB)
+        .join(Referral, Referral.referred_id == UserDB.id)
+        .filter(Referral.referrer_id == user.id)
+        .all()
+    )
+
+    return {
+        "referrer": user.username,
+        "referrals": [
+            {"id": u.id, "username": u.username, "email": u.email, "full_name": u.full_name}
+            for u in referrals
+        ]
+    }
 
 # Run with Render-assigned port
 if __name__ == "__main__":
